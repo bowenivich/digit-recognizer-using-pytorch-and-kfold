@@ -107,7 +107,9 @@ plt.subplots_adjust(wspace=-0.1, hspace=-0.1)
 plt.show()
 ```
 
-![Visualization](src/visualization.png)
+<p align="center">
+  <img src="src/visualization.png" />
+</p>
 
 ### The Model
 
@@ -165,7 +167,9 @@ class Net(nn.Module):
 
 `KFold` from [scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.KFold.html) is used to avoid overfitting. The training dataset is shuffled and split into 5 folds, 80% and 20% of which will be used to train and validate the model respectively. 
 
-[Structure](src/structure.png)
+<p align="center">
+  <img src="src/structure.png" />
+</p>
 
 ```
 from sklearn.model_selection import KFold
@@ -296,4 +300,6 @@ submission.to_csv('submission.csv')
 
 The submission achieved an accuracy score of 0.99367, the 193th on the leaderboard at the time of submission. 
 
-![Leaderboard](src/leaderboard.png)
+<p align="center">
+  <img src="src/leaderboard.png" />
+</p>
