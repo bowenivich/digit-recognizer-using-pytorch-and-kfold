@@ -257,11 +257,11 @@ for fold, (train_ids, val_ids) in enumerate(kf.split(train_data)):
 
 The best models are saved to local from the following folds and epochs. 
 ```
-fold 1 | epoch 226 | 0.002 | 0.000 | 0.990 | network improved
-fold 2 | epoch 232 | 0.002 | 0.000 | 0.988 | network improved
-fold 3 | epoch 221 | 0.003 | 0.000 | 0.989 | network improved
-fold 4 | epoch 228 | 0.003 | 0.000 | 0.989 | network improved
-fold 5 | epoch 246 | 0.002 | 0.000 | 0.989 | network improved
+fold 1 | epoch 244 | 0.002 | 0.000 | 0.991 | network improved
+fold 2 | epoch 234 | 0.003 | 0.000 | 0.989 | network improved
+fold 3 | epoch 193 | 0.003 | 0.000 | 0.989 | network improved
+fold 4 | epoch 239 | 0.002 | 0.000 | 0.989 | network improved
+fold 5 | epoch 238 | 0.003 | 0.000 | 0.988 | network improved
 ```
 
 ### Ensemble
@@ -290,10 +290,9 @@ predictions = pd.DataFrame(np.argmax(pred, axis=1), columns=['Label'])
 
 Save the predictions to local for submission. 
 ```
-submission = pd.DataFrame(predictions, columns=['Label'])
-submission.index += 1
-submission.index.name = 'ImageId'
-submission.to_csv('submission.csv')
+predictions.index += 1
+predictions.index.name = 'ImageId'
+predictions.to_csv('submission.csv')
 ```
 
 ## Results
