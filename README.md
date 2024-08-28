@@ -13,8 +13,6 @@ Starting with the most fundamental task of digit recognition using the MNIST dat
 The datasets are downloaded from the [Digit Recognizer](https://www.kaggle.com/competitions/digit-recognizer/data) competition on Kaggle. 
 
 ```
-import pandas as pd
-
 train = pd.read_csv('digit-recognizer/train.csv')
 test = pd.read_csv('digit-recognizer/test.csv')
 ```
@@ -27,46 +25,38 @@ test = pd.read_csv('digit-recognizer/test.csv')
 > 
 > The `DataLoader` pulls instances of data from the Dataset (either automatically or with a sampler that you define), collects them in batches, and returns them for consumption by your training loop. The DataLoader works with all kinds of datasets, regardless of the type of data they contain.
 
-First, define 2 Dataset classes. 
+Define 2 Dataset classes, transformations, and normalizations. 
 ```
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-
 class TrainDataset(Dataset):
     def __init__(self, dataframe, transform=None):
         self.labels = dataframe.iloc[:, 0].values
-        self.images = dataframe.iloc[:, 1:].values
+        self.features = dataframe.iloc[:, 1:].values
         self.transform = transform
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, index):
-        image = self.images[index].reshape(28, 28).astype(np.uint8)
+        feature = self.features[index].reshape(28, 28).astype(np.uint8)
         label = self.labels[index]
         if self.transform:
-            image = self.transform(image)
-        
-        return image, label
+            feature = self.transform(feature)
+        return feature, label
 
 class TestDataset(Dataset):
     def __init__(self, dataframe, transform=None):
-        self.images = dataframe.values
+        self.features = dataframe.values
         self.transform = transform
 
     def __len__(self):
-        return len(self.images)
+        return len(self.features)
 
     def __getitem__(self, index):
-        image = self.images[index].reshape(28, 28).astype(np.uint8)
+        feature = self.features[index].reshape(28, 28).astype(np.uint8)
         if self.transform:
-            image = self.transform(image)
-        
-        return image
-```
+            feature = self.transform(feature)
+        return feature
 
-Second, apply transformations and normalizations. 
-```
 train_mean = train.drop('label', axis=1).values.mean()/255
 train_std = train.drop('label', axis=1).values.std()/255
 
@@ -84,9 +74,12 @@ test_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(train_mean, train_std)
 ])
+```
 
-train_data = TrainDataset(train, transform=train_transform)
-test_data = TestDataset(test, transform=test_transform)
+The training set and testing set are ready. 
+```
+training_set = TrainDataset(train, transform=train_transform)
+testing_set = TestDataset(test, transform=test_transform)
 ```
 
 Note that the data transformation or augmentation as implemented here does **not** create new data permanently in the dataset. Instead, it applies the transformations **on-the-fly** during training. Each time a batch of data is requested from the `DataLoader`, the transformations are applied to that batch dynamically. They don't take up additional memory or storage. 
@@ -95,13 +88,11 @@ Note that the data transformation or augmentation as implemented here does **not
 
 Visualize the data as a sanity check. 
 ```
-import matplotlib.pyplot as plt
-
 plt.figure(figsize=(15, 6))
 for i in range(30):  
     plt.subplot(3, 10, i+1)
-    plt.imshow(train_data.images[i].reshape((28, 28)), cmap=plt.cm.binary)
-    plt.title(train_data.labels[i])
+    plt.imshow(training_set.features[i].reshape((28, 28)), cmap=plt.cm.binary)
+    plt.title(training_set.labels[i])
     plt.axis('off')
 plt.subplots_adjust(wspace=-0.1, hspace=-0.1)
 plt.show()
@@ -115,8 +106,6 @@ plt.show()
 
 Below is the neural network. 
 ```
-from torch import nn, optim
-
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -163,126 +152,166 @@ class Net(nn.Module):
         return self.fc(x)
 ```
 
+Below is a function to reset model weights for the `KFold`. 
+```
+def reset_weights(m):
+    for layer in m.children():
+        if hasattr(layer, 'reset_parameters'):
+            layer.reset_parameters()
+```
+
 ### Structure
 
-`KFold` from [scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.KFold.html) is used to avoid overfitting. The training dataset is shuffled and split into 5 folds, 80% and 20% of which will be used to train and validate the model respectively. 
+`KFold` from [scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.KFold.html) is used to avoid overfitting. The training set is shuffled and split into 5 folds, 80% and 20% of which will be used to train and validate the model respectively. 
 
 <p align="center">
   <img src="src/structure.png" />
 </p>
 
-```
-from sklearn.model_selection import KFold
-
-n_splits = 5
-kf = KFold(n_splits=n_splits, shuffle=True)
-```
-
 ### Training
 
-I'm using the Mac Studio, so I will use the `mps` device for GPU training acceleration. 
+Below are the parameters and variables for the training. 
 ```
-import torch
+n_splits = 5
+batch_size = 100
+learning_rate = 0.0001
+epochs = 100
+loss_fn = nn.CrossEntropyLoss()
+training_losses_list, validation_losses_list, validation_accuracies_list = [], [], []
+```
+
+I'm using a Mac Studio, so I will use the `mps` device for GPU training acceleration. 
+```
 device = torch.device('mps')
 ```
 
 Start training!
 ```
-import numpy as np
-from torch.utils.data.sampler import SubsetRandomSampler
+kf = KFold(n_splits=n_splits, shuffle=True)
 
-batch_size = 100
-learning_rate = 0.001
-epochs = 250
-running_losses_list, val_losses_list, val_accuracies_list = [], [], []
-
-for fold, (train_ids, val_ids) in enumerate(kf.split(train_data)):
-    train_sampler = SubsetRandomSampler(train_ids)
-    val_sampler = SubsetRandomSampler(val_ids)
-    train_loader = DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
-    val_loader = DataLoader(train_data, batch_size=batch_size, sampler=val_sampler)
-
+for fold, (training_ids, validation_ids) in enumerate(kf.split(training_set)):
+    training_sampler = SubsetRandomSampler(training_ids)
+    validation_sampler = SubsetRandomSampler(validation_ids)
+    training_loader = DataLoader(training_set, batch_size=batch_size, sampler=training_sampler)
+    validation_loader = DataLoader(training_set, batch_size=batch_size, sampler=validation_sampler)
+    
     model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-    loss_fn = nn.CrossEntropyLoss()
+    model.apply(reset_weights)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    running_loss_min = np.inf
-    val_loss_min = np.inf
-
-    running_losses, val_losses, val_accuracies = [], [], []
+    training_loss_min = np.inf
+    validation_loss_min = np.inf
+    training_losses, validation_losses, validation_accuracies = [], [], []
     
     for e in range(epochs):
         model.train()
-        running_loss = 0
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+        training_loss = 0
+        for features, labels in training_loader:
+            features, labels = features.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images)
+            outputs = model(features)
             loss = loss_fn(outputs, labels)
             loss.backward()
             optimizer.step()
-            running_loss += loss.item()
-        
+            training_loss += loss.item()
+
         model.eval()
-        val_loss = 0
+        validation_loss = 0
         correct, total = 0, 0
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                loss = loss_fn(outputs, labels)
-                val_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-        val_accuracy = correct / total
-        
-        running_losses.append(running_loss/total)
-        val_losses.append(val_loss/total)
-        val_accuracies.append(val_accuracy)
+        for features, labels in validation_loader:
+            features, labels = features.to(device), labels.to(device)
+            outputs = model(features)
+            loss = loss_fn(outputs, labels)
+            validation_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        validation_accuracy = correct / total
 
-        network_learned = (running_loss < running_loss_min) & (val_loss < val_loss_min)
+        training_losses.append(training_loss/total)
+        validation_losses.append(validation_loss/total)
+        validation_accuracies.append(validation_accuracy)
+
+        network_learned = (training_loss < training_loss_min) & (validation_loss < validation_loss_min)
         if network_learned:
-            running_loss_min = running_loss
-            val_loss_min = val_loss
-            torch.save(model.state_dict(), 'model_mnist_' + str(fold+1) + '.pt')
-            print(f'fold {fold+1} | epoch {e+1} | {running_loss/total:.3f} | {val_loss/total:.3f} | {val_accuracy:.3f} | network improved')
+            training_loss_min = training_loss
+            validation_loss_min = validation_loss
+            torch.save(model.state_dict(), f'model_mnist_{fold+1}.pt')
+            print(f'fold {fold+1} | epoch {e+1} | {training_loss/total:.3f} | {validation_loss/total:.3f} | {validation_accuracy:.3f} | network improved')
         else:
-            print(f'fold {fold+1} | epoch {e+1} | {running_loss/total:.3f} | {val_loss/total:.3f} | {val_accuracy:.3f}')
-
-    running_losses_list.append(running_losses)
-    val_losses_list.append(val_losses)
-    val_accuracies_list.append(val_accuracies)
+            print(f'fold {fold+1} | epoch {e+1} | {training_loss/total:.3f} | {validation_loss/total:.3f} | {validation_accuracy:.3f}')
+    
+    training_losses_list.append(training_losses)
+    validation_losses_list.append(validation_losses)
+    validation_accuracies_list.append(validation_accuracies)
 ```
 
 The best models are saved to local from the following folds and epochs. 
 ```
-fold 1 | epoch 244 | 0.002 | 0.000 | 0.991 | network improved
-fold 2 | epoch 234 | 0.003 | 0.000 | 0.989 | network improved
-fold 3 | epoch 193 | 0.003 | 0.000 | 0.989 | network improved
-fold 4 | epoch 239 | 0.002 | 0.000 | 0.989 | network improved
-fold 5 | epoch 238 | 0.003 | 0.000 | 0.988 | network improved
+fold 1 | epoch 100 | 0.001 | 0.000 | 0.992 | network improved
+fold 2 | epoch 94 | 0.001 | 0.000 | 0.993 | network improved
+fold 3 | epoch 86 | 0.001 | 0.000 | 0.994 | network improved
+fold 4 | epoch 88 | 0.001 | 0.000 | 0.993 | network improved
+fold 5 | epoch 97 | 0.001 | 0.000 | 0.992 | network improved
 ```
+
+Below is the visualization of the training losses and the validation losses. 
+```
+fig, [[ax1, ax2, ax3], [ax4, ax5, ax6]] = plt.subplots(nrows=2, ncols=3, figsize=(18, 4))
+
+ax1.plot(training_losses_list[0], label='training_loss')
+ax1.plot(validation_losses_list[0], label='validation_loss')
+ax1.set_title('Fold 1')
+
+ax2.plot(training_losses_list[1], label='training_loss')
+ax2.plot(validation_losses_list[1], label='validation_loss')
+ax2.set_title('Fold 2')
+
+ax3.plot(training_losses_list[2], label='training_loss')
+ax3.plot(validation_losses_list[1], label='validation_loss')
+ax3.set_title('Fold 3')
+
+ax4.plot(training_losses_list[3], label='training_loss')
+ax4.plot(validation_losses_list[3], label='validation_loss')
+ax4.set_title('Fold 4')
+
+ax5.plot(training_losses_list[4], label='training_loss')
+ax5.plot(validation_losses_list[4], label='validation_loss')
+ax5.set_title('Fold 5')
+
+training_losses_average = [sum(x)/len(x) for x in zip(*training_losses_list)]
+validation_losses_average = [sum(x)/len(x) for x in zip(*validation_losses_list)]
+ax6.plot(training_losses_average, label='training_loss')
+ax6.plot(validation_losses_average, label='validation_loss')
+ax6.set_title('Average')
+
+ax3.legend()
+plt.tight_layout()
+```
+
+<p align="center">
+  <img src="src/losses.png" />
+</p>
 
 ### Ensemble
 
-I ensemble the 5 models saved from training to make the final predictions on the test dataset. 
+I ensemble the 5 models saved from training to make the final predictions on the testing set. 
 ```
 models = []
-for i in range(0, 5):
+for fold in range(0, 5):
     model = Net().to(device)
-    model.load_state_dict(torch.load('model_mnist_' + str(i+1) + '.pt', weights_only=False))
+    model.load_state_dict(torch.load(f'model_mnist_{fold+1}.pt', weights_only=False))
     model.eval()
     models.append(model)
 
-test_loader = DataLoader(test_data, batch_size=len(test_data), shuffle=False)
+testing_loader = DataLoader(testing_set, batch_size=len(testing_set), shuffle=False)
 
 pred = np.zeros(280000).reshape(28000, 10)
 with torch.no_grad():
     for model in models:
-        for images in test_loader:
-            images = images.to(device)
-            outputs = model(images)
+        for features in testing_loader:
+            features = features.to(device)
+            outputs = model(features)
             pred += 0.2 * outputs.cpu().numpy()
 
 predictions = pd.DataFrame(np.argmax(pred, axis=1), columns=['Label'])
@@ -297,7 +326,7 @@ predictions.to_csv('submission.csv')
 
 ## Results
 
-The submission achieved an accuracy score of 0.99367, the 193th on the leaderboard at the time of submission. 
+The submission achieved an accuracy score of 0.99575, the 84th on the leaderboard at the time of submission. 
 
 <p align="center">
   <img src="src/leaderboard.png" />
