@@ -6,6 +6,8 @@ Convolutional Neural Networks (CNNs) have become the standard for tasks involvin
 
 Starting with the most fundamental task of digit recognition using the MNIST dataset which is considered as the "Hello World" dataset of computer vision, this project aims to develop a strong understanding of CNNs in preparation for more complex image recognition tasks in the future. 
 
+Achieved the 84th on Kaggle! 
+
 ## Rundown
 
 ### Import Datasets
